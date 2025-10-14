@@ -19,10 +19,10 @@
 #include "ns3/network-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/mobility-module.h"
-#include "ns3/csma-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/yans-wifi-helper.h"
 #include "ns3/ssid.h"
+#include "ns3/ipv4-global-routing-helper.h"
 
 // Default Network Topology
 //
@@ -37,30 +37,28 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("ThirdScriptExample");
+NS_LOG_COMPONENT_DEFINE ("Lab1Part3Script");
 
-int 
+int
 main (int argc, char *argv[])
 {
-  bool verbose = true;
-  uint32_t nCsma = 3;
   uint32_t nWifi = 3;
-  bool tracing = false;
+  uint32_t nPackets = 1;
 
+  bool verbose = true;
+  bool tracing = false;
+  
   CommandLine cmd (__FILE__);
-  cmd.AddValue ("nCsma", "Number of \"extra\" CSMA nodes/devices", nCsma);
-  cmd.AddValue ("nWifi", "Number of wifi STA devices", nWifi);
+  cmd.AddValue ("nWifi", "Number of STA devices PER WiFi network (nWifi total = 2 * nWifi). Max 9.", nWifi);
+  cmd.AddValue ("nPackets", "Number of packets for UdpEchoClient to send. Max 20 for plotting.", nPackets);
   cmd.AddValue ("verbose", "Tell echo applications to log if true", verbose);
   cmd.AddValue ("tracing", "Enable pcap tracing", tracing);
 
   cmd.Parse (argc,argv);
 
-  // The underlying restriction of 18 is due to the grid position
-  // allocator's configuration; the grid layout will exceed the
-  // bounding box if more than 18 nodes are provided.
-  if (nWifi > 18)
+  if (nWifi > 9)
     {
-      std::cout << "nWifi should be 18 or less; otherwise grid layout exceeds the bounding box" << std::endl;
+      std::cout << "nWifi deve ser 9 ou menos; o número total de nós sem fio excede 18." << std::endl;
       return 1;
     }
 
@@ -72,6 +70,17 @@ main (int argc, char *argv[])
 
   NodeContainer p2pNodes;
   p2pNodes.Create (2);
+  Ptr<Node> n0 = p2pNodes.Get (0);
+  Ptr<Node> n1 = p2pNodes.Get (1);
+  
+  NodeContainer wifi1StaNodes;
+  wifi1StaNodes.Create (nWifi);
+
+  NodeContainer wifi2StaNodes;
+  wifi2StaNodes.Create (nWifi);
+  
+  Ptr<Node> n7 = wifi1StaNodes.Get (nWifi - 1);
+  Ptr<Node> n4 = wifi2StaNodes.Get (nWifi - 1);
 
   PointToPointHelper pointToPoint;
   pointToPoint.SetDeviceAttribute ("DataRate", StringValue ("5Mbps"));
@@ -80,40 +89,38 @@ main (int argc, char *argv[])
   NetDeviceContainer p2pDevices;
   p2pDevices = pointToPoint.Install (p2pNodes);
 
-  NodeContainer csmaNodes;
-  csmaNodes.Add (p2pNodes.Get (1));
-  csmaNodes.Create (nCsma);
-
-  CsmaHelper csma;
-  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
-  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (6560)));
-
-  NetDeviceContainer csmaDevices;
-  csmaDevices = csma.Install (csmaNodes);
-
-  NodeContainer wifiStaNodes;
-  wifiStaNodes.Create (nWifi);
-  NodeContainer wifiApNode = p2pNodes.Get (0);
-
-  YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
   YansWifiPhyHelper phy;
-  phy.SetChannel (channel.Create ());
-
   WifiMacHelper mac;
-  Ssid ssid = Ssid ("ns-3-ssid");
-
   WifiHelper wifi;
+  Ssid ssid1 = Ssid ("Rede-A");
+  Ssid ssid2 = Ssid ("Rede-B");
 
-  NetDeviceContainer staDevices;
+  YansWifiChannelHelper channel1 = YansWifiChannelHelper::Default ();
+  phy.SetChannel (channel1.Create ()); 
+
+  NetDeviceContainer sta1Devices;
   mac.SetType ("ns3::StaWifiMac",
-               "Ssid", SsidValue (ssid),
-               "ActiveProbing", BooleanValue (false));
-  staDevices = wifi.Install (phy, mac, wifiStaNodes);
+               "Ssid", SsidValue (ssid1));
+  sta1Devices = wifi.Install (phy, mac, wifi1StaNodes);
 
-  NetDeviceContainer apDevices;
+  NetDeviceContainer ap1Devices;
   mac.SetType ("ns3::ApWifiMac",
-               "Ssid", SsidValue (ssid));
-  apDevices = wifi.Install (phy, mac, wifiApNode);
+               "Ssid", SsidValue (ssid1));
+  ap1Devices = wifi.Install (phy, mac, n0);
+
+  YansWifiChannelHelper channel2 = YansWifiChannelHelper::Default ();
+
+  phy.SetChannel (channel2.Create ()); 
+
+  NetDeviceContainer sta2Devices;
+  mac.SetType ("ns3::StaWifiMac",
+               "Ssid", SsidValue (ssid2));
+  sta2Devices = wifi.Install (phy, mac, wifi2StaNodes);
+
+  NetDeviceContainer ap2Devices;
+  mac.SetType ("ns3::ApWifiMac",
+               "Ssid", SsidValue (ssid2));
+  ap2Devices = wifi.Install (phy, mac, n1);
 
   MobilityHelper mobility;
 
@@ -127,56 +134,61 @@ main (int argc, char *argv[])
 
   mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
                              "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)));
-  mobility.Install (wifiStaNodes);
+  mobility.Install (wifi1StaNodes);
+
+  mobility.Install (wifi2StaNodes);
 
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.Install (wifiApNode);
+  mobility.Install (n0);
+  mobility.Install (n1);
 
   InternetStackHelper stack;
-  stack.Install (csmaNodes);
-  stack.Install (wifiApNode);
-  stack.Install (wifiStaNodes);
+  stack.Install (p2pNodes);
+  stack.Install (wifi1StaNodes);
+  stack.Install (wifi2StaNodes);
 
   Ipv4AddressHelper address;
 
   address.SetBase ("10.1.1.0", "255.255.255.0");
-  Ipv4InterfaceContainer p2pInterfaces;
-  p2pInterfaces = address.Assign (p2pDevices);
+  address.Assign (p2pDevices);
 
   address.SetBase ("10.1.2.0", "255.255.255.0");
-  Ipv4InterfaceContainer csmaInterfaces;
-  csmaInterfaces = address.Assign (csmaDevices);
-
+  Ipv4InterfaceContainer ap2Interfaces = address.Assign (ap2Devices);
+  address.Assign (sta2Devices);
+  
   address.SetBase ("10.1.3.0", "255.255.255.0");
-  address.Assign (staDevices);
-  address.Assign (apDevices);
+  address.Assign (ap1Devices);
+  address.Assign (sta1Devices);
 
-  UdpEchoServerHelper echoServer (9);
+Ipv4Address serverAddress = n4->GetObject<Ipv4> ()->GetAddress (1, 0).GetLocal ();
 
-  ApplicationContainer serverApps = echoServer.Install (csmaNodes.Get (nCsma));
+uint16_t serverPort = 9;
+
+  UdpEchoServerHelper echoServer (serverPort);
+  ApplicationContainer serverApps = echoServer.Install (n4);
   serverApps.Start (Seconds (1.0));
-  serverApps.Stop (Seconds (10.0));
+  serverApps.Stop (Seconds (20.0));
 
-  UdpEchoClientHelper echoClient (csmaInterfaces.GetAddress (nCsma), 9);
-  echoClient.SetAttribute ("MaxPackets", UintegerValue (1));
+  UdpEchoClientHelper echoClient (serverAddress, serverPort);
+  echoClient.SetAttribute ("MaxPackets", UintegerValue (nPackets));
   echoClient.SetAttribute ("Interval", TimeValue (Seconds (1.0)));
   echoClient.SetAttribute ("PacketSize", UintegerValue (1024));
 
-  ApplicationContainer clientApps = 
-    echoClient.Install (wifiStaNodes.Get (nWifi - 1));
+  ApplicationContainer clientApps = echoClient.Install (n7);
   clientApps.Start (Seconds (2.0));
-  clientApps.Stop (Seconds (10.0));
+  clientApps.Stop (Seconds (20.0));
 
   Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
 
-  Simulator::Stop (Seconds (10.0));
+  Simulator::Stop (Seconds (20.0));
 
   if (tracing)
     {
       phy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);
-      pointToPoint.EnablePcapAll ("third");
-      phy.EnablePcap ("third", apDevices.Get (0));
-      csma.EnablePcap ("third", csmaDevices.Get (0), true);
+      pointToPoint.EnablePcapAll ("lab1-part3-p2p");
+
+      phy.EnablePcap ("lab1-part3-wifi1-ap", ap1Devices.Get (0));
+      phy.EnablePcap ("lab1-part3-wifi2-ap", ap2Devices.Get (0));
     }
 
   Simulator::Run ();
