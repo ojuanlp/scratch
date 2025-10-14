@@ -33,7 +33,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("SecondScriptModificado");
+NS_LOG_COMPONENT_DEFINE ("Lab1Part2Script");
 
 int
 main (int argc, char *argv[])
